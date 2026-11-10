@@ -16,8 +16,9 @@ const starterRecords = [
 const labels = {all:'Все достижения', student:'Достижения учеников', vsosh:'Всероссийская олимпиада школьников', teacher:'Достижения учителей', school:'Достижения и благодарности школы'};
 const categoryLabels = {student:'Ученик', vsosh:'ВсОШ', teacher:'Учитель', school:'Школа'};
 const levelOrder = {'Международный':5,'Всероссийский':4,'Региональный':3,'Муниципальный':2,'Школьный':1};
-const storedSnapshot=JSON.parse(localStorage.getItem('school-achievements-v2')||'null');
-let records = storedSnapshot || [...starterRecords, ...JSON.parse(localStorage.getItem('school-achievements') || '[]')];
+const shared = document.body.hasAttribute('data-shared-catalog');
+let records = shared ? [] : (JSON.parse(localStorage.getItem('school-achievements-v2')||'null') ||
+  [...starterRecords, ...JSON.parse(localStorage.getItem('school-achievements') || '[]')]);
 let currentSection = 'all';
 let editingId = null;
 let selectedDocument = null;
@@ -27,7 +28,28 @@ const $ = id => document.getElementById(id);
 const controls = {search:$('searchInput'), year:$('yearFilter'), level:$('levelFilter'), region:$('regionFilter'), result:$('resultFilter'), sort:$('sortSelect')};
 
 function escapeHtml(value='') { return String(value).replace(/[&<>'"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c])); }
-function saveRecords(){ localStorage.setItem('school-achievements-v2',JSON.stringify(records)); }
+async function refreshSharedRecords(){
+  const response = await fetch('/api/records');
+  if(!response.ok) throw new Error('Не удалось загрузить общую базу.');
+  records = await response.json();
+  refreshFilterOptions();
+  render();
+}
+async function saveEntry(entry, id=null){
+  if(shared){
+    const response = await fetch('/api/records', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({...entry,id})
+    });
+    if(response.status===409) throw new Error('Запись уже изменили. Закройте форму и откройте запись заново.');
+    if(!response.ok) throw new Error('Сервер не сохранил запись. Проверьте поля и размер вложения.');
+    entry=await response.json();
+  }
+  records=id===null ? [...records,entry] : records.map(record=>record.id===id?entry:record);
+  if(!shared) localStorage.setItem('school-achievements-v2',JSON.stringify(records));
+  return entry;
+}
 function initials(name) { const p=name.trim().split(/\s+/); return ((p[0]?.[0]||'')+(p[1]?.[0]||'')).toUpperCase(); }
 function fillSelect(select, values) { values.filter(Boolean).sort((a,b)=>b.localeCompare(a,'ru')).forEach(v => { const o=document.createElement('option'); o.value=v; o.textContent=v; select.append(o); }); }
 function populateFilters() {
@@ -130,12 +152,15 @@ function closeDocumentViewer(){
 $('closeDocument').addEventListener('click',closeDocumentViewer);
 documentDialog.addEventListener('click',e=>{if(e.target===documentDialog) closeDocumentViewer();});
 
+let originalRecord;
 function openEntryForm(id=null){
   const form=$('entryForm'); form.reset(); editingId=id; selectedDocument=null; removeExistingDocument=false; clearDocumentPreview(); setDocumentError();
   const record=id===null?null:records.find(r=>r.id===id);
+  originalRecord=record;
+  document.getElementById('saveError').hidden=true;
   $('formEyebrow').textContent=record?'Исправление записи':'Новая публикация';
   $('formTitle').textContent=record?'Изменить достижение':'Добавить достижение';
-  $('formNote').textContent=record?'Исправьте сведения и сохраните изменения.':'Заполните основные сведения. Запись появится в каталоге этого браузера.';
+  $('formNote').textContent=record?'Исправьте сведения и сохраните изменения.':'Заполните основные сведения и сохраните запись.';
   $('submitEntry').textContent=record?'Сохранить изменения':'Сохранить запись';
   if(record){
     ['category','year','name','title','level','result','region','detail','subject'].forEach(key=>{if(form.elements[key]) form.elements[key].value=record[key]||'';});
@@ -179,14 +204,28 @@ dialog.addEventListener('paste',e=>{const item=[...e.clipboardData.items].find(x
 $('removeDocument').addEventListener('click',()=>{selectedDocument=null; removeExistingDocument=true; $('documentInput').value=''; clearDocumentPreview(); setDocumentError();});
 
 $('entryForm').addEventListener('submit',async e=>{
-  e.preventDefault(); const data=Object.fromEntries(new FormData(e.currentTarget));
+  e.preventDefault(); const form=e.currentTarget;
+  if(document.getElementById('submitEntry').disabled) return;
+  const data=Object.fromEntries(new FormData(form));
   delete data.document;
-  const previous=editingId===null?null:records.find(r=>r.id===editingId);
+  const previous=originalRecord;
   const entry={...previous,...data,id:editingId??Date.now(),date:previous?.date||new Date().toISOString().slice(0,10)};
   if(selectedDocument){entry.documentName=selectedDocument.name; entry.documentType=selectedDocument.type; entry.documentData=selectedDocument.data;}
   if(removeExistingDocument){delete entry.documentName; delete entry.documentType; delete entry.documentData;}
-  if(editingId===null) records.push(entry); else records=records.map(r=>r.id===editingId?entry:r);
-  saveRecords(); e.currentTarget.reset(); dialog.close(); currentSection='all';
+  const submit=document.getElementById('submitEntry');
+  const errorBox=document.getElementById('saveError');
+  errorBox.hidden=true;
+  submit.disabled=true;
+  try {
+    await saveEntry(entry,editingId);
+  } catch(error) {
+    errorBox.textContent=error.message;
+    errorBox.hidden=false;
+    return;
+  } finally {
+    submit.disabled=false;
+  }
+  form.reset(); dialog.close(); currentSection='all';
   document.querySelectorAll('.nav-link').forEach(x=>x.classList.toggle('active',x.dataset.section==='all'));
   refreshFilterOptions(); render(); $('toast').textContent=editingId===null?'Запись добавлена':'Изменения сохранены'; $('toast').classList.add('show'); setTimeout(()=>$('toast').classList.remove('show'),2200);
 });
@@ -216,16 +255,27 @@ function registerAchievementTool() {
         required:['category','year','name','title','level','result','region']
       },
       annotations:{readOnlyHint:false,untrustedContentHint:false},
-      execute(input){
+      async execute(input){
         if(!input || typeof input!=='object') throw new Error('Не переданы данные достижения');
         const required=['category','year','name','title','level','result','region'];
         if(required.some(k=>typeof input[k]!=='string'||!input[k].trim())) throw new Error('Заполнены не все обязательные поля');
         const entry={...input,detail:input.detail||'',subject:input.subject||'',id:Date.now(),date:new Date().toISOString().slice(0,10)};
-        records.push(entry); saveRecords(); refreshFilterOptions(); render();
-        return {id:entry.id,status:'created',name:entry.name,title:entry.title};
+        const saved=await saveEntry(entry); refreshFilterOptions(); render();
+        return {id:saved.id,status:'created',name:entry.name,title:entry.title};
       }
     });
   } catch(error) { console.warn('WebMCP недоступен',error); }
 }
 
 populateFilters(); render(); registerAchievementTool();
+if(shared){
+  const status=document.getElementById('databaseStatus');
+  const refresh=async()=>{
+    if(dialog.open || documentDialog.open) return;
+    try { await refreshSharedRecords(); status.hidden=true; }
+    catch { status.hidden=false; }
+  };
+  refresh();
+  window.addEventListener('focus',refresh);
+  setInterval(refresh,15000);
+}

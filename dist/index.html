@@ -44,6 +44,7 @@
     </section>
 
     <section class="workspace" aria-label="Каталог достижений">
+      <p class="field-error" id="databaseStatus" role="status" hidden>Общая база недоступна. Проверьте подключение к серверу.</p>
       <div class="search-row">
         <label class="search-box">
           <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m16 16 5 5"/></svg>
@@ -109,6 +110,7 @@
           </div>
         </div>
       </div>
+      <p class="field-error" id="saveError" role="alert" hidden></p>
       <div class="dialog-actions"><button type="button" class="secondary" id="cancelForm">Отмена</button><button type="submit" class="primary" id="submitEntry">Сохранить запись</button></div>
     </form>
   </dialog>
