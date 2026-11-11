@@ -125,7 +125,14 @@
         <img id="documentViewerImage" alt="Подтверждающий документ" hidden>
         <iframe id="documentViewerPdf" title="Подтверждающий документ PDF" hidden></iframe>
       </div>
-      <div class="document-viewer-actions"><a class="primary" id="downloadDocument" download>Скачать документ</a></div>
+      <div class="document-viewer-actions">
+        <div class="document-zoom" id="documentZoom" role="group" aria-label="Масштаб изображения" hidden>
+          <button type="button" class="secondary" id="zoomOut" aria-label="Уменьшить">−</button>
+          <button type="button" class="secondary" id="zoomFit">Целиком</button>
+          <button type="button" class="secondary" id="zoomIn" aria-label="Увеличить">+</button>
+        </div>
+        <a class="primary" id="downloadDocument" download>Скачать документ</a>
+      </div>
     </div>
   </dialog>
 

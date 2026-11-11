@@ -83,7 +83,7 @@ function card(record) {
       <div class="card-meta"><span class="badge ${gold?'gold':''}">${escapeHtml(categoryLabels[record.category])}</span><span class="badge neutral">${escapeHtml(record.level)}</span><span class="badge ${gold?'gold':''}">${escapeHtml(record.result)}</span></div>
       <h3>${escapeHtml(record.title)}</h3><p class="person">${escapeHtml(record.name)}</p>
       <p class="details"><span>${escapeHtml(record.detail)}</span><span>${escapeHtml(record.subject)}</span><span>${escapeHtml(record.region)}</span></p>
-      <div class="card-actions">${record.documentData?`<button type="button" class="document-link open-document" data-document-id="${record.id}" aria-label="Открыть подтверждающий документ">▣ Документ приложен</button>`:''}<button type="button" class="edit-record" data-edit-id="${record.id}">Изменить</button><span class="card-year">${escapeHtml(record.year)}</span></div>
+      <div class="card-actions">${record.documentData?`<button type="button" class="document-link open-document" data-document-id="${record.id}" aria-label="Открыть подтверждающий документ">${hasImage?'Открыть скан':'Открыть PDF'}</button>`:''}<button type="button" class="edit-record" data-edit-id="${record.id}">Изменить</button><span class="card-year">${escapeHtml(record.year)}</span></div>
     </div></article>`;
 }
 function render() {
@@ -126,6 +126,19 @@ $('cards').addEventListener('click',e=>{
 
 const documentDialog=$('documentDialog');
 let activeDocumentUrl=null;
+let documentScale=1;
+const viewerImage=$('documentViewerImage');
+const viewer=viewerImage.parentElement;
+function setDocumentScale(scale){
+  documentScale=Math.max(1,Math.min(4,scale));
+  viewerImage.style.setProperty('--document-scale', `${documentScale*100}%`);
+  $('zoomOut').disabled=documentScale===1;
+  $('zoomIn').disabled=documentScale===4;
+  if(documentScale===1) viewer.scrollTo(0,0);
+}
+$('zoomOut').addEventListener('click',()=>setDocumentScale(documentScale-.5));
+$('zoomIn').addEventListener('click',()=>setDocumentScale(documentScale+.5));
+$('zoomFit').addEventListener('click',()=>setDocumentScale(1));
 function dataUrlToBlob(dataUrl){
   const [header,encoded]=dataUrl.split(',');
   const mime=header.match(/data:([^;]+)/)?.[1]||'application/octet-stream';
@@ -143,7 +156,9 @@ function openDocumentViewer(id){
   $('documentViewerImage').hidden=!isImage; $('documentViewerPdf').hidden=isImage;
   if(isImage) $('documentViewerImage').src=activeDocumentUrl; else $('documentViewerPdf').src=activeDocumentUrl;
   $('downloadDocument').href=activeDocumentUrl; $('downloadDocument').download=record.documentName||'document';
+  $('documentZoom').hidden=!isImage;
   documentDialog.showModal();
+  setDocumentScale(1);
 }
 function closeDocumentViewer(){
   documentDialog.close(); $('documentViewerImage').removeAttribute('src'); $('documentViewerPdf').removeAttribute('src');
