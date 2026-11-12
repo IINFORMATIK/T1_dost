@@ -1,0 +1,8 @@
+**
+!Dockerfile
+!dist/
+!dist/index.html
+!dist/app.js
+!dist/styles.css
+!scripts/
+!scripts/catalog-server.mjs

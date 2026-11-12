@@ -1,0 +1,8 @@
+services:
+  catalog:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "10.160.46.146:8090:8080"
+    volumes:
+      - ./local-data:/data
