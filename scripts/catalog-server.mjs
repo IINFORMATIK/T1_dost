@@ -21,8 +21,13 @@ const assets = new Map([
   ['/app.js', ['app.js', 'text/javascript; charset=utf-8']],
   ['/styles.css', ['styles.css', 'text/css; charset=utf-8']],
 ]);
+function recordSummary({ documentData, ...record }) {
+  return { ...record, hasDocument: Boolean(documentData) };
+}
+
 const required = ['category', 'year', 'name', 'title', 'level', 'result', 'region'];
-const fields = [...required, 'detail', 'subject'];
+const fields = [...required, 'detail', 'subject', 'department'];
+const departments = new Set(['', 'math', 'science', 'language', 'foreign', 'history', 'arts', 'primary', 'unassigned']);
 
 createServer(async (req, res) => {
   const json = (status, body) => res.writeHead(status, {
@@ -30,6 +35,22 @@ createServer(async (req, res) => {
   }).end(JSON.stringify(body));
   try {
     if (req.url === '/api/records' && req.method === 'GET') return json(200, records);
+    if (req.url === '/api/records?summary=1' && req.method === 'GET') {
+      return json(200, records.map(recordSummary));
+    }
+    const documentMatch = req.method === 'GET' && /^\/api\/records\/(\d+)\/document\?revision=(\d+)$/.exec(req.url);
+    if (documentMatch) {
+      const record = records.find(record => record.id === Number(documentMatch[1]) &&
+        record.revision === Number(documentMatch[2]));
+      if (!record?.documentData) return json(404, {});
+      const bytes = Buffer.from(record.documentData.split(',')[1], 'base64');
+      return res.writeHead(200, {
+        'Content-Type': record.documentType,
+        'Content-Length': bytes.length,
+        'Cache-Control': 'private, no-cache',
+        'X-Content-Type-Options': 'nosniff',
+      }).end(bytes);
+    }
     if (req.url === '/api/records' && req.method === 'POST') {
       if (!/^application\/json(?:;|$)/i.test(req.headers['content-type'] || '')) return json(415, {});
       const chunks = [];
@@ -43,6 +64,7 @@ createServer(async (req, res) => {
       try { input = JSON.parse(Buffer.concat(chunks)); } catch { return json(400, {}); }
       if (!input || required.some(key => typeof input[key] !== 'string' || !input[key].trim()) ||
           fields.some(key => input[key] !== undefined && (typeof input[key] !== 'string' || input[key].length > 4096)) ||
+          !departments.has(input.department ?? '') ||
           !['student', 'vsosh', 'teacher', 'school'].includes(input.category)) return json(400, {});
       const previous = input.id == null ? null : records.find(record => record.id === input.id);
       if (input.id != null && (!previous || previous.revision !== input.revision)) return json(409, {});
@@ -53,6 +75,9 @@ createServer(async (req, res) => {
         if (!match || match[1] !== input.documentType || Buffer.from(match[2], 'base64').length > 2 * 1024 * 1024 ||
             typeof input.documentName !== 'string' || input.documentName.length > 512) return json(400, {});
         Object.assign(entry, { documentData: input.documentData, documentType: input.documentType, documentName: input.documentName });
+      } else if (input.keepDocument === true && previous?.documentData) {
+        const { documentData, documentType, documentName } = previous;
+        Object.assign(entry, { documentData, documentType, documentName });
       }
       entry.id = previous?.id ?? records.reduce((max, record) => Math.max(max, record.id), 0) + 1;
       entry.date = previous?.date ?? new Date().toISOString().slice(0, 10);
@@ -61,7 +86,7 @@ createServer(async (req, res) => {
       writeFileSync(database + '.tmp', JSON.stringify(next), { mode: 0o600 });
       renameSync(database + '.tmp', database);
       records = next;
-      return json(previous ? 200 : 201, entry);
+      return json(previous ? 200 : 201, input.summary === true ? recordSummary(entry) : entry);
     }
     const asset = req.method === 'GET' && assets.get(req.url);
     if (!asset) return json(404, {});

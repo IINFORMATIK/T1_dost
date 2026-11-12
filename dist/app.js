@@ -20,16 +20,18 @@ const shared = document.body.hasAttribute('data-shared-catalog');
 let records = shared ? [] : (JSON.parse(localStorage.getItem('school-achievements-v2')||'null') ||
   [...starterRecords, ...JSON.parse(localStorage.getItem('school-achievements') || '[]')]);
 let currentSection = 'all';
+const pageSize = 12;
+let currentPage = 1;
 let editingId = null;
 let selectedDocument = null;
 let removeExistingDocument = false;
 
 const $ = id => document.getElementById(id);
-const controls = {search:$('searchInput'), year:$('yearFilter'), level:$('levelFilter'), region:$('regionFilter'), result:$('resultFilter'), sort:$('sortSelect')};
+const controls = {search:$('searchInput'), year:$('yearFilter'), level:$('levelFilter'), region:$('regionFilter'), result:$('resultFilter'), department:$('departmentFilter'), sort:$('sortSelect')};
 
 function escapeHtml(value='') { return String(value).replace(/[&<>'"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c])); }
 async function refreshSharedRecords(){
-  const response = await fetch('/api/records');
+  const response = await fetch('/api/records?summary=1');
   if(!response.ok) throw new Error('Не удалось загрузить общую базу.');
   records = await response.json();
   refreshFilterOptions();
@@ -40,7 +42,7 @@ async function saveEntry(entry, id=null){
     const response = await fetch('/api/records', {
       method:'POST',
       headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({...entry,id})
+      body:JSON.stringify({...entry,id,summary:true})
     });
     if(response.status===409) throw new Error('Запись уже изменили. Закройте форму и откройте запись заново.');
     if(!response.ok) throw new Error('Сервер не сохранил запись. Проверьте поля и размер вложения.');
@@ -52,6 +54,30 @@ async function saveEntry(entry, id=null){
 }
 function initials(name) { const p=name.trim().split(/\s+/); return ((p[0]?.[0]||'')+(p[1]?.[0]||'')).toUpperCase(); }
 function fillSelect(select, values) { values.filter(Boolean).sort((a,b)=>b.localeCompare(a,'ru')).forEach(v => { const o=document.createElement('option'); o.value=v; o.textContent=v; select.append(o); }); }
+const departments = [
+  ['math', 'Математика и информатика', /математ|информатик|программирован|искусственный интеллект|нейросет|vr-разработ|цифровой экосистем|электронного документооборот|умный город/u],
+  ['science', 'Естественно-научные предметы', /биологи|хими|физик|географ|экологи|естествознан|естественно-науч|максвелл|агронтри|агрокосмос|солнечная батарея|закон бернулли|закон паскаля|рост растений|пробиотик|картофель|тропического растения/u],
+  ['language', 'Русский язык и литература', /русский язык|литератур|чтец|чтецов|декламаци|пушкинские|чехове|медиажурналистик/u],
+  ['foreign', 'Иностранные языки', /иностранн.{0,8} язык|английск|французск|испанск|немецк|лингвистическ/u],
+  ['history', 'История и обществознание', /истори|обществознан|краевед|архивист|отечество|топонимик|воинской славы|международные отношения|(?:^|\s)право(?:$|\s)|экономик|предприниматель/u],
+  ['arts', 'Искусство, технология и физическая культура', /технологи[яию]\b|технологи[яию](?=$|[\s«])|искусств[оау]|изодиктант|изобразительн|вокал|песни|музык|хоров|рисунок|физической культур|физическая культур|спорт|стрельб|обж|кадет|безопасно.{0,20}дорог|рукотворном дереве|юные таланты московии|техническо.{0,8} творчеств|техническому моделированию|робототехник|технофест|интэра|дежурный по планете/u],
+  ['primary', 'Начальные классы', /(?:^|\s)[1-4](?:[а-я«» ]*) класс|начальн.{0,8} школ/u],
+];
+const technology = /3[дd]|аддитивн|промышленн.{0,8} дизайн|изготовление прототипов|инженерный дизайн|транспортные технологии будущего|техника и техническое творчество/u;
+function recordDepartments(record) {
+  if(record.department) return [record.department];
+  const subject=(record.subject || '').toLocaleLowerCase('ru');
+  const title=(record.title || '').toLocaleLowerCase('ru');
+  const detail=(record.detail || '').toLocaleLowerCase('ru');
+  if(technology.test(title) || technology.test(subject)) return ['arts'];
+  if(/^технология/u.test(subject) || /всош по технологии|олимпиада школьников по технологии/u.test(title)) return ['arts'];
+  for(const value of [subject,title,detail]){
+    if(technology.test(value)) return ['arts'];
+    const matches=departments.filter(([, , pattern])=>pattern.test(value)).map(([key])=>key);
+    if(matches.length) return matches;
+  }
+  return ['unassigned'];
+}
 function populateFilters() {
   fillSelect(controls.year,[...new Set(records.map(r=>r.year))]);
   fillSelect(controls.level,[...new Set(records.map(r=>r.level))]);
@@ -65,17 +91,20 @@ function filteredRecords() {
     && (!controls.year.value||r.year===controls.year.value)
     && (!controls.level.value||r.level===controls.level.value)
     && (!controls.region.value||r.region===controls.region.value)
-    && (!controls.result.value||r.result===controls.result.value));
+    && (!controls.result.value||r.result===controls.result.value)
+    && (!controls.department.value||recordDepartments(r).includes(controls.department.value)));
   if(controls.sort.value==='name') list.sort((a,b)=>a.name.localeCompare(b.name,'ru'));
   else if(controls.sort.value==='level') list.sort((a,b)=>(levelOrder[b.level]||0)-(levelOrder[a.level]||0));
   else list.sort((a,b)=>b.date.localeCompare(a.date));
   return list;
 }
+function hasDocument(record) { return Boolean(shared ? record.hasDocument : record.documentData); }
+function documentUrl(record) { return shared ? `/api/records/${record.id}/document?revision=${record.revision}` : record.documentData; }
 function card(record) {
   const gold=record.category==='vsosh'||record.result==='Победитель';
-  const hasImage=record.documentData&&(record.documentType||'').startsWith('image/');
+  const hasImage=hasDocument(record)&&(record.documentType||'').startsWith('image/');
   const leftSide=hasImage
-    ? `<button type="button" class="card-document-preview open-document" data-document-id="${record.id}" aria-label="Открыть изображение подтверждающего документа"><img src="${record.documentData}" alt="Документ, подтверждающий достижение: ${escapeHtml(record.name)}"></button>`
+    ? `<button type="button" class="card-document-preview open-document" data-document-id="${record.id}" aria-label="Открыть изображение подтверждающего документа"><img loading="lazy" decoding="async" src="${escapeHtml(documentUrl(record))}" alt="Документ, подтверждающий достижение: ${escapeHtml(record.name)}"></button>`
     : `<div class="avatar" aria-hidden="true">${escapeHtml(initials(record.name))}</div>`;
   return `<article class="achievement-card ${hasImage?'has-image':''}" data-category="${record.category}">
     ${leftSide}
@@ -83,32 +112,109 @@ function card(record) {
       <div class="card-meta"><span class="badge ${gold?'gold':''}">${escapeHtml(categoryLabels[record.category])}</span><span class="badge neutral">${escapeHtml(record.level)}</span><span class="badge ${gold?'gold':''}">${escapeHtml(record.result)}</span></div>
       <h3>${escapeHtml(record.title)}</h3><p class="person">${escapeHtml(record.name)}</p>
       <p class="details"><span>${escapeHtml(record.detail)}</span><span>${escapeHtml(record.subject)}</span><span>${escapeHtml(record.region)}</span></p>
-      <div class="card-actions">${record.documentData?`<button type="button" class="document-link open-document" data-document-id="${record.id}" aria-label="Открыть подтверждающий документ">${hasImage?'Открыть скан':'Открыть PDF'}</button>`:''}<button type="button" class="edit-record" data-edit-id="${record.id}">Изменить</button><span class="card-year">${escapeHtml(record.year)}</span></div>
+      <div class="card-actions">${hasDocument(record)?`<button type="button" class="document-link open-document" data-document-id="${record.id}" aria-label="Открыть подтверждающий документ">${hasImage?'Открыть скан':'Открыть PDF'}</button>`:''}<button type="button" class="edit-record" data-edit-id="${record.id}">Изменить</button><span class="card-year">${escapeHtml(record.year)}</span></div>
     </div></article>`;
 }
+const reportDepartments = new Map([...departments.map(([key,label])=>[key,label]),['unassigned','Требует уточнения']]);
+function reportOptions(select, placeholder, options){
+  const previous=select.value;
+  select.replaceChildren(new Option(placeholder,''));
+  for(const [key,label] of options) select.add(new Option(label,key));
+  select.value=options.some(([key])=>key===previous)?previous:'';
+}
+function reportBars(id, groups){
+  const largest=Math.max(1,...groups.map(([,count])=>count));
+  $(id).innerHTML=groups.length?groups.map(([label,count])=>
+    `<li><span>${escapeHtml(label)}</span><strong>${count}</strong><span class="report-track" aria-hidden="true"><span style="width:${count/largest*100}%"></span></span></li>`
+  ).join(''):'<li>Нет данных</li>';
+}
+function renderReport(){
+  const year=$('reportYear'), category=$('reportCategory'), department=$('reportDepartment'), check=$('reportCheck');
+  const years=[...new Set(records.map(record=>record.year).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'ru',{numeric:true}));
+  reportOptions(year,'Все годы',years.map(value=>[value,value]));
+  reportOptions(category,'Все разделы',Object.entries(categoryLabels));
+  reportOptions(department,'Все объединения',[...reportDepartments]);
+  const entries=records.map(record=>({record, groups:recordDepartments(record)})).filter(({record,groups})=>
+    (!year.value || record.year===year.value) && (!category.value || record.category===category.value) &&
+    (!department.value || groups.includes(department.value)) &&
+    (check.value!=='missing' || !hasDocument(record)) && (check.value!=='unassigned' || groups.includes('unassigned')));
+  const count=entries.length;
+  const missing=entries.filter(({record})=>!hasDocument(record)).length;
+  const unresolved=entries.filter(({groups})=>groups.includes('unassigned')).length;
+  $('reportScope').textContent=[year.value||'Все учебные годы',category.selectedOptions[0].text,department.selectedOptions[0].text,check.selectedOptions[0].text].join(' · ');
+  $('reportError').hidden=$('databaseStatus').hidden;
+  $('reportMetrics').innerHTML=[
+    ['Записей',count],['Победителей',entries.filter(({record})=>record.result==='Победитель').length],
+    ['Без вложения',missing],['ШМО требует уточнения',unresolved]
+  ].map(([label,value])=>`<div><dt>${label}</dt><dd>${value}</dd></div>`).join('');
+  const yearCounts=new Map(), departmentCounts=new Map();
+  for(const {record,groups} of entries){
+    yearCounts.set(record.year,(yearCounts.get(record.year)||0)+1);
+    for(const group of groups) departmentCounts.set(group,(departmentCounts.get(group)||0)+1);
+  }
+  reportBars('reportYears',years.filter(value=>yearCounts.has(value)).map(value=>[value,yearCounts.get(value)]));
+  reportBars('reportDepartments',[...reportDepartments].filter(([key])=>departmentCounts.has(key))
+    .map(([key,label])=>[label,departmentCounts.get(key)]).sort((a,b)=>b[1]-a[1]));
+  $('reportCount').textContent=`Записей: ${count}`;
+  entries.sort((a,b)=>a.record.name.localeCompare(b.record.name,'ru') || a.record.id-b.record.id);
+  $('reportRows').innerHTML=entries.length?entries.map(({record,groups})=>`<tr>
+    <td>${escapeHtml(record.id)}</td><td>${escapeHtml(record.name)}</td><td>${escapeHtml(record.title)}<small>${escapeHtml([record.level,record.subject,record.detail].filter(Boolean).join(' · '))}</small></td>
+    <td>${escapeHtml(record.year)}</td><td>${escapeHtml(record.result)}</td><td>${escapeHtml(groups.map(key=>reportDepartments.get(key)).filter(Boolean).join(', '))}</td>
+    <td>${hasDocument(record)?`<button type="button" class="document-link" data-report-document="${escapeHtml(record.id)}">Открыть</button><span class="report-print-document">Есть</span>`:'Нет'}</td></tr>`).join(''):
+    '<tr><td colspan="7">По выбранным фильтрам записей нет.</td></tr>';
+}
+for(const id of ['reportYear','reportCategory','reportDepartment','reportCheck']) $(id).addEventListener('change',renderReport);
+$('printReport').addEventListener('click',()=>window.print());
+$('reportRows').addEventListener('click',event=>{
+  const button=event.target.closest('[data-report-document]');
+  if(button) openDocumentViewer(Number(button.dataset.reportDocument));
+});
 function render() {
+  const reporting=currentSection==='statistics';
+  $('catalogIntro').hidden=reporting;
+  $('catalogWorkspace').hidden=reporting;
+  $('statistics').hidden=!reporting;
+  document.body.classList.toggle('report-open',reporting);
+  if(reporting){ renderReport(); return; }
   const list=filteredRecords();
-  $('cards').innerHTML=list.map(card).join('');
+  const pageCount=Math.max(1,Math.ceil(list.length/pageSize));
+  currentPage=Math.min(currentPage,pageCount);
+  const start=(currentPage-1)*pageSize;
+  $('cards').innerHTML=list.slice(start,start+pageSize).map(card).join('');
+  $('pagination').hidden=pageCount===1;
+  $('pagePrevious').disabled=currentPage===1;
+  $('pageNext').disabled=currentPage===pageCount;
+  $('pageStatus').textContent=`Страница ${currentPage} из ${pageCount}`;
   $('emptyState').hidden=list.length>0;
   $('cards').hidden=list.length===0;
   $('sectionTitle').textContent=labels[currentSection];
   $('resultCount').textContent=`Найдено записей: ${list.length}`;
-  const active=[controls.year.value,controls.level.value,controls.region.value,controls.result.value,controls.search.value].filter(Boolean).length;
+  const active=[controls.year.value,controls.level.value,controls.region.value,controls.result.value,controls.department.value,controls.search.value].filter(Boolean).length;
   $('filterCount').textContent=active?`· ${active}`:'';
   $('statTotal').textContent=records.length;
   $('statWinners').textContent=records.filter(r=>r.result==='Победитель').length;
   $('statRegions').textContent=new Set(records.map(r=>r.region)).size;
 }
-function reset() { controls.search.value=''; controls.year.value=''; controls.level.value=''; controls.region.value=''; controls.result.value=''; render(); }
+function renderFirstPage(){ currentPage=1; render(); }
+for(const [id,step] of [['pagePrevious',-1],['pageNext',1]]){
+  $(id).addEventListener('click',()=>{
+    currentPage+=step;
+    render();
+    $('sectionTitle').focus();
+    $('sectionTitle').scrollIntoView({block:'start'});
+  });
+}
+function reset() { controls.search.value=''; controls.year.value=''; controls.level.value=''; controls.region.value=''; controls.result.value=''; controls.department.value=''; renderFirstPage(); }
 
 document.querySelectorAll('.nav-link').forEach(btn=>btn.addEventListener('click',()=>{
   currentSection=btn.dataset.section;
   document.querySelectorAll('.nav-link').forEach(x=>x.classList.toggle('active',x===btn));
   const menu=$('mobileMenu');
   if(menu.getAttribute('aria-expanded')==='true') menu.focus();
-  menu.setAttribute('aria-expanded','false'); document.querySelector('.top-nav').classList.remove('open'); render();
+  menu.setAttribute('aria-expanded','false'); document.querySelector('.top-nav').classList.remove('open'); renderFirstPage();
+  if(currentSection==='statistics') $('reportTitle').focus();
 }));
-Object.values(controls).forEach(c=>c.addEventListener(c===controls.search?'input':'change',render));
+Object.values(controls).forEach(c=>c.addEventListener(c===controls.search?'input':'change',renderFirstPage));
 $('resetFilters').addEventListener('click',reset); $('emptyReset').addEventListener('click',reset);
 $('filterToggle').addEventListener('click',()=>{const open=$('filters').classList.toggle('open'); $('filterToggle').setAttribute('aria-expanded',String(open));});
 $('mobileMenu').addEventListener('click',()=>{const nav=document.querySelector('.top-nav'); const open=nav.classList.toggle('open'); $('mobileMenu').setAttribute('aria-expanded',String(open));});
@@ -148,9 +254,9 @@ function dataUrlToBlob(dataUrl){
 }
 function openDocumentViewer(id){
   const record=records.find(r=>r.id===id);
-  if(!record?.documentData) return;
+  if(!record || !hasDocument(record)) return;
   if(activeDocumentUrl) URL.revokeObjectURL(activeDocumentUrl);
-  activeDocumentUrl=URL.createObjectURL(dataUrlToBlob(record.documentData));
+  activeDocumentUrl=shared ? documentUrl(record) : URL.createObjectURL(dataUrlToBlob(record.documentData));
   const isImage=(record.documentType||'').startsWith('image/');
   $('documentViewerTitle').textContent=record.documentName||'Подтверждающий документ';
   $('documentViewerImage').hidden=!isImage; $('documentViewerPdf').hidden=isImage;
@@ -160,10 +266,11 @@ function openDocumentViewer(id){
   documentDialog.showModal();
   setDocumentScale(1);
 }
-function closeDocumentViewer(){
-  documentDialog.close(); $('documentViewerImage').removeAttribute('src'); $('documentViewerPdf').removeAttribute('src');
+function clearDocumentViewer(){ $('documentViewerImage').removeAttribute('src'); $('documentViewerPdf').removeAttribute('src');
   if(activeDocumentUrl){URL.revokeObjectURL(activeDocumentUrl); activeDocumentUrl=null;}
 }
+documentDialog.addEventListener('close',clearDocumentViewer);
+function closeDocumentViewer(){ documentDialog.close(); }
 $('closeDocument').addEventListener('click',closeDocumentViewer);
 documentDialog.addEventListener('click',e=>{if(e.target===documentDialog) closeDocumentViewer();});
 
@@ -172,14 +279,23 @@ function openEntryForm(id=null){
   const form=$('entryForm'); form.reset(); editingId=id; selectedDocument=null; removeExistingDocument=false; clearDocumentPreview(); setDocumentError();
   const record=id===null?null:records.find(r=>r.id===id);
   originalRecord=record;
+  const yearSelect=form.elements.year;
+  const now=new Date();
+  const firstYear=now.getFullYear()-(now.getMonth()<8?1:0);
+  const years=[...new Set([...records.map(item=>item.year), `${firstYear}–${firstYear+1}`])];
+  yearSelect.replaceChildren();
+  fillSelect(yearSelect,years);
+  yearSelect.value=record?.year || `${firstYear}–${firstYear+1}`;
   document.getElementById('saveError').hidden=true;
   $('formEyebrow').textContent=record?'Исправление записи':'Новая публикация';
   $('formTitle').textContent=record?'Изменить достижение':'Добавить достижение';
   $('formNote').textContent=record?'Исправьте сведения и сохраните изменения.':'Заполните основные сведения и сохраните запись.';
   $('submitEntry').textContent=record?'Сохранить изменения':'Сохранить запись';
   if(record){
-    ['category','year','name','title','level','result','region','detail','subject'].forEach(key=>{if(form.elements[key]) form.elements[key].value=record[key]||'';});
-    if(record.documentData) showDocumentPreview({name:record.documentName||'Подтверждающий документ',type:record.documentType||'',data:record.documentData});
+    ['category','name','title','level','result','region','detail','subject'].forEach(key=>{if(form.elements[key]) form.elements[key].value=record[key]||'';});
+    const [department]=recordDepartments(record);
+    form.elements.department.value=record.department || (department==='unassigned'?'':department);
+    if(hasDocument(record)) showDocumentPreview({name:record.documentName||'Подтверждающий документ',type:record.documentType||'',data:documentUrl(record)});
   }
   dialog.showModal();
 }
@@ -225,6 +341,7 @@ $('entryForm').addEventListener('submit',async e=>{
   delete data.document;
   const previous=originalRecord;
   const entry={...previous,...data,id:editingId??Date.now(),date:previous?.date||new Date().toISOString().slice(0,10)};
+  if(shared) entry.keepDocument=Boolean(previous?.hasDocument && !removeExistingDocument && !selectedDocument);
   if(selectedDocument){entry.documentName=selectedDocument.name; entry.documentType=selectedDocument.type; entry.documentData=selectedDocument.data;}
   if(removeExistingDocument){delete entry.documentName; delete entry.documentType; delete entry.documentData;}
   const submit=document.getElementById('submitEntry');
@@ -282,13 +399,17 @@ function registerAchievementTool() {
   } catch(error) { console.warn('WebMCP недоступен',error); }
 }
 
+for(const [key,label] of [...departments,['unassigned','Требует уточнения']]){
+  controls.department.add(new Option(label,key));
+  $('entryDepartment').add(new Option(label,key));
+}
 populateFilters(); render(); registerAchievementTool();
 if(shared){
   const status=document.getElementById('databaseStatus');
   const refresh=async()=>{
     if(dialog.open || documentDialog.open) return;
-    try { await refreshSharedRecords(); status.hidden=true; }
-    catch { status.hidden=false; }
+    try { await refreshSharedRecords(); status.hidden=true; $('reportError').hidden=true; }
+    catch { status.hidden=false; $('reportError').hidden=false; }
   };
   refresh();
   window.addEventListener('focus',refresh);

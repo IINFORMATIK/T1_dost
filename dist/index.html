@@ -24,13 +24,14 @@
         <button class="nav-link" data-section="vsosh">ВсОШ</button>
         <button class="nav-link" data-section="teacher">Учителя</button>
         <button class="nav-link" data-section="school">Школа</button>
+        <button class="nav-link" data-section="statistics">Статистика</button>
       </nav>
       <button class="add-button" id="openForm"><span aria-hidden="true">＋</span> Добавить запись</button>
     </div>
   </header>
 
   <main>
-    <section class="intro">
+    <section class="intro" id="catalogIntro">
       <div>
         <p class="eyebrow">2025–2026 учебный год</p>
         <h1>Гордимся успехами нашей школы</h1>
@@ -43,7 +44,7 @@
       </div>
     </section>
 
-    <section class="workspace" aria-label="Каталог достижений">
+    <section class="workspace" id="catalogWorkspace" aria-label="Каталог достижений">
       <p class="field-error" id="databaseStatus" role="status" hidden>Общая база недоступна. Проверьте подключение к серверу.</p>
       <div class="search-row">
         <label class="search-box">
@@ -59,21 +60,51 @@
         <label>Уровень<select id="levelFilter"><option value="">Все уровни</option></select></label>
         <label>Регион<select id="regionFilter"><option value="">Все регионы</option></select></label>
         <label>Результат<select id="resultFilter"><option value="">Все результаты</option></select></label>
+        <label>ШМО<select id="departmentFilter"><option value="">Все объединения</option></select></label>
         <button class="reset-button" id="resetFilters" type="button">Сбросить</button>
       </div>
 
       <div class="results-heading">
-        <div><h2 id="sectionTitle">Все достижения</h2><p id="resultCount"></p></div>
+        <div><h2 id="sectionTitle" tabindex="-1">Все достижения</h2><p id="resultCount"></p></div>
         <label class="sort-control">Сортировка
           <select id="sortSelect"><option value="new">Сначала новые</option><option value="name">По фамилии</option><option value="level">По уровню</option></select>
         </label>
       </div>
 
       <div class="cards" id="cards" aria-live="polite"></div>
+    <nav id="pagination" class="catalog-pagination" aria-label="Страницы достижений" hidden>
+      <button type="button" class="edit-record" id="pagePrevious">Назад</button>
+      <span id="pageStatus" aria-live="polite"></span>
+      <button type="button" class="edit-record" id="pageNext">Далее</button>
+    </nav>
       <div class="empty-state" id="emptyState" hidden>
         <div>⌕</div><h3>Ничего не найдено</h3><p>Измените запрос или сбросьте фильтры.</p>
         <button id="emptyReset">Сбросить фильтры</button>
       </div>
+    </section>
+    <section id="statistics" class="workspace report" aria-labelledby="reportTitle" hidden>
+      <div class="report-heading">
+        <div><h1 id="reportTitle" tabindex="-1">Статистика достижений</h1><p id="reportScope"></p></div>
+        <button type="button" class="primary" id="printReport">Печать</button>
+      </div>
+      <div class="filters report-filters">
+        <label>Учебный год<select id="reportYear"></select></label>
+        <label>Раздел<select id="reportCategory"></select></label>
+        <label>ШМО<select id="reportDepartment"></select></label>
+        <label>Для сверки<select id="reportCheck"><option value="">Все записи</option><option value="missing">Без вложения</option><option value="unassigned">ШМО требует уточнения</option></select></label>
+      </div>
+      <p class="field-error" id="reportError" role="status" hidden>Общая база недоступна. Проверьте подключение к серверу.</p>
+      <dl class="report-metrics" id="reportMetrics"></dl>
+      <div class="report-charts">
+        <section class="report-panel"><h2>По учебным годам</h2><ul id="reportYears" class="report-bars"></ul></section>
+        <section class="report-panel"><h2>По ШМО</h2><ul id="reportDepartments" class="report-bars"></ul></section>
+      </div>
+      <section class="report-panel report-register">
+        <div class="report-heading"><h2>Реестр для сверки</h2><p id="reportCount"></p></div>
+        <div class="report-table-wrap" tabindex="0" role="region" aria-label="Таблица достижений">
+          <table><thead><tr><th scope="col">№</th><th scope="col">Участник</th><th scope="col">Достижение</th><th scope="col">Учебный год</th><th scope="col">Результат</th><th scope="col">ШМО</th><th scope="col">Документ</th></tr></thead><tbody id="reportRows"></tbody></table>
+        </div>
+      </section>
     </section>
   </main>
 
@@ -85,13 +116,14 @@
       <p class="form-note" id="formNote">Заполните основные сведения. Запись появится в каталоге этого браузера.</p>
       <div class="form-grid">
         <label>Раздел<select name="category" required><option value="student">Ученик</option><option value="vsosh">ВсОШ</option><option value="teacher">Учитель</option><option value="school">Школа / благодарность</option></select></label>
-        <label>Учебный год<select name="year" required><option>2025–2026</option><option>2024–2025</option><option>2023–2024</option></select></label>
+        <label>Учебный год<select name="year" required></select></label>
         <label class="wide">ФИО участника или название команды<input name="name" required placeholder="Например, Иванова Мария"></label>
         <label class="wide">Название конкурса, олимпиады или благодарности<input name="title" required placeholder="Введите полное название"></label>
         <label>Уровень<select name="level" required><option>Школьный</option><option>Муниципальный</option><option>Региональный</option><option>Всероссийский</option><option>Международный</option></select></label>
         <label>Результат<select name="result" required><option>Победитель</option><option>Призёр</option><option>Лауреат</option><option>Участник</option><option>Благодарность</option></select></label>
         <label>Регион<input name="region" required placeholder="Например, Москва"></label>
         <label>Класс / должность<input name="detail" placeholder="Например, 8А класс"></label>
+        <label class="wide">ШМО<select id="entryDepartment" name="department"><option value="">Определить автоматически</option></select></label>
         <label class="wide">Предмет или направление<input name="subject" placeholder="Например, Математика"></label>
         <div class="wide file-field">
           <span class="field-label">Подтверждающий документ</span>
